@@ -13,7 +13,7 @@ router.get("/places/search", async(req, res) => {
             return res.status(400).json({
                 success: false,
                 message: "Query parameter is required"   
-            })
+            })}
 
             const response = await fetch(
                 'https://places.googleapis.com/v1/places:searchText',
@@ -22,14 +22,13 @@ router.get("/places/search", async(req, res) => {
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
-                        'X_Goog-FieldMask': 'places.id, places.displayName, places.formattedAddress, places.priceLevel'
+                        'X_Goog-FieldMask': 'places.id, places.displayName, places.formattedAddress, places.location'
                     },
                     body: JSON.stringify({
                         textQuery: query
                     })
                 }
             )
-        }
         const data = await response.json();
 
         if(!response.ok) {
@@ -59,6 +58,65 @@ router.get("/places/search", async(req, res) => {
             message: err.message
         })
     }
+});
+
+
+// places API - nearby search
+router.post("/places/nearby", async (req, res) => {
+   try{
+
+    const {latitude, longitude, raduis, type} = req.body;
+    if(!latitude || !longitude || !raduis || !type) {
+        return res.status(400).json({
+            success: false,
+            message: "All fileds are required!"
+        })
+    }
+
+    const response = await fetch(
+        'https://places.googleapis.com/v1/places:searchNearby',
+        {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
+                'X_Goog-FieldMask': 'places.id, places.displayName, places.formattedAddress, places.locationm places.primaryType'
+            },
+            body: JSON.stringify({
+                includedTypes: [type],
+                maxResultCount: 10,
+                locationRestriction: {
+                    circle: {
+                    center: {
+                        latitude,
+                        longitude
+                    },
+                    radius
+                   }
+                }
+            }),
+        }
+    );
+
+    const data = await response.json();
+        if(!response.ok) {
+            return res.status(500).json({
+                success: false,
+                message: data   
+            })
+        }
+    
+    return res.status(200).json({
+        success: true,
+        data
+    });
+
+   }catch(err){
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        })
+   } 
 });
 
 module.exports = router;
