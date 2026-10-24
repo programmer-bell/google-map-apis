@@ -18,7 +18,7 @@ router.get("/places/search", async(req, res) => {
             const response = await fetch(
                 'https://places.googleapis.com/v1/places:searchText',
                 {
-                    method: 'POST',
+                    method: 'GET',
                     headers: {
                         'Content-Type': 'application/json',
                         'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
@@ -105,6 +105,53 @@ router.post("/places/nearby", async (req, res) => {
                 message: data   
             })
         }
+    
+    return res.status(200).json({
+        success: true,
+        data
+    });
+
+   }catch(err){
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        })
+   } 
+});
+
+
+//places API - placeID search 
+router.get("/plcaes/:placeId", async (req, res) => {
+   try{
+
+    const { placeId } = req.params;
+    if(!placeId) {
+        return res.status(400).json({
+            success: false,
+            message: "PlceId is required!"
+        })      
+    }
+
+    const response = await fetch(
+        `https://places.googleapis.com/v1/places/${placeId}`,
+            {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
+                    'X_Goog-FieldMask': 'id, formattedAddress, rating, userRatingCount, nationalPhoneNumber, regularOpeningHours, reviews',
+                    }
+            }
+
+    );
+
+    const data = await response.json();
+    if(!response.ok) {
+        return res.status(500).json({
+            success: false,
+            message: data   
+        })
+    }
     
     return res.status(200).json({
         success: true,
