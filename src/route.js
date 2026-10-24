@@ -2,8 +2,16 @@ const express = require("express");
 const axios = require("axios");
 const dotenv = require("dotenv");
 
+const { GoogleGenAI } = require("@google/genai");
+const { decode } = require("@googlemaps/polyline-codec");
+
 const router = express.Router();
 dotenv.config();
+
+// ai api calling 
+const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY
+});
 
 // places API - text search 
 router.get("/places/search", async(req, res) => {
@@ -120,7 +128,7 @@ router.post("/places/nearby", async (req, res) => {
 });
 
 
-//places API - placeID search 
+// places API - placeID search 
 router.get("/plcaes/:placeId", async (req, res) => {
    try{
 
@@ -164,6 +172,88 @@ router.get("/plcaes/:placeId", async (req, res) => {
             message: err.message
         })
    } 
+});
+
+
+// places API - placeId anakyzer 
+router.get("/places/:placeId/analyze", async(req, res) => {
+	try{
+
+    const { placeId } = req.params;
+    if(!placeId) {
+        return res.status(400).json({
+            success: false,
+            message: "PlceId is required!"
+        })      
+    }
+
+    const response = await fetch(
+        `https://places.googleapis.com/v1/places/${placeId}`,
+            {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
+                    'X_Goog-FieldMask': 'id, formattedAddress, rating, userRatingCount, nationalPhoneNumber, regularOpeningHours, reviews',
+                    }
+            }
+
+    );
+
+    if(!response.ok) {
+        return res.status(500).json({
+            success: false,
+            message: response   
+        })
+    }
+
+    const place = await response.json();
+
+    // prepare review text
+    const review = (place.reviews || []).map((review) => review.text?.text).filter(Boolean);
+    const reviews = review.join("\n\n");
+    // console.log(reviews);
+
+    // ask to gemini 
+        const prompt = `You are analyzing a place for someone who wants to work there.
+
+        Place:
+        ${place.displayName?.text}
+
+        Rating:
+        ${place.rating}
+
+        Number of ratings:
+        ${place.userRatingCount}
+
+        Reviews:
+        ${reviews.join("\n\n")}
+
+        Answer:
+        1. Is this a good place to work?
+        2. What are the positive points?
+        3. What are the negative points?
+        4. Give a final score out of 10.
+
+        Keep the answer practical and concise.`;
+
+        const result = await ai.models.generateContent({
+            model: 'gemini-3.5-flash-lite',
+            contents: prompt
+        });
+
+        return res.json({
+            success: true,
+            place: place.displayName?.text,
+            analysis: result.text
+        });
+
+	}catch(err){
+		return res.status(500).json({
+			success: false,
+			message: err.message
+		})	
+	}
 });
 
 module.exports = router;
