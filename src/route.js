@@ -256,4 +256,59 @@ router.get("/places/:placeId/analyze", async(req, res) => {
 	}
 });
 
+
+// routes API 
+router.post("/routes", async (req, res) => {
+    try{
+
+        const { originaLat, originLng, destinationLat, destinationLng } = req.body;
+        const response = await fetch(
+            `https://routes.googleapis.com/directions/v2:computeRoutes`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
+                    'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline'
+                },
+                body: JSON.stringify({
+                    origin: {
+                        location: {
+                            latLng: {
+                                latitude: originLat,
+                                longitude: originLng
+                            }
+                        }
+                    },
+                    destination: {
+                        location: {
+                            latLng: {
+                                latitude: destinationLat,
+                                longitude: destinationLng
+                            }
+                        }
+                    },
+                    travelMode: "DRIVE",
+                    routingPreference: "TRAFFIC_AWARE"
+                })
+            }
+        );
+
+        const data = await response.json();
+        if (!response.ok) {
+            return res.status(response.status).json(data);
+        }
+        return res.json({
+            success: true,
+            route: data.routes?.[0]
+        });
+
+    }catch(err){
+		return res.status(500).json({
+			success: false,
+			message: err.message
+		})	
+	}
+});
+
 module.exports = router;
