@@ -60,14 +60,25 @@ The API starts at `http://localhost:3000`; all endpoints are prefixed with `/api
 
 ## 📍 API reference
 
-### Places
+All routes are mounted under `/api`. For example, the router path
+`/places/search` is available at `http://localhost:3000/api/places/search`.
+
+### Place search and details
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `GET` | `/api/places/search?query=coffee%20shops%20in%20Delhi` | Search for places by text |
-| `POST` | `/api/places/nearby` | Find places near coordinates |
-| `GET` | `/api/places/:placeId` | Retrieve detailed place information |
-| `GET` | `/api/places/:placeId/analyze` | Analyze reviews with Gemini |
+| `GET` | `/api/places/search?query=coffee%20shops%20in%20Delhi` | Search by words or a natural-language phrase |
+| `POST` | `/api/places/nearby` | Find places of a given type near a coordinate |
+| `GET` | `/api/places/:placeId` | Get ratings, contact details, hours, and reviews |
+| `GET` | `/api/places/:placeId/analyze` | Ask Gemini for a concise workplace review analysis |
+
+The text-search endpoint requires a `query` query parameter. The nearby
+endpoint accepts `latitude`, `longitude`, `radius` (meters), and `type` in its
+JSON body, and returns up to ten results.
+
+```bash
+curl 'http://localhost:3000/api/places/search?query=coffee%20shops%20in%20Delhi'
+```
 
 Example nearby search:
 
@@ -82,19 +93,68 @@ curl -X POST http://localhost:3000/api/places/nearby \
   }'
 ```
 
+Replace `:placeId` with the Google Place ID. The details endpoint returns
+Google's requested place fields under `data`. The analysis endpoint uses the
+place's available review text and returns `place` and `analysis`; it is an
+AI-generated summary, not a guarantee about an employer.
+
 ### Routes and trip planning
 
 | Method | Endpoint | Description |
 | --- | --- | --- |
-| `POST` | `/api/routes` | Get a traffic-aware driving route |
-| `POST` | `/api/places/search-along-route` | Search for places along an encoded route polyline |
-| `POST` | `/api/places/search-along-route-detour` | Return stops filtered and sorted by detour time |
-| `POST` | `/api/places/halfway-search` | Search along a route around its midpoint |
-| `POST` | `/api/places/halfway-nearby` | Search within a bounding area around the midpoint |
-| `POST` | `/api/places/halfway-by-distance` | Find a midpoint using total route distance |
-| `POST` | `/api/road-trip/search` | Full road-trip recommendation workflow |
+| `POST` | `/api/routes` | Calculate a traffic-aware driving route |
+| `POST` | `/api/places/search-along-route` | Search for matching places along a route |
+| `POST` | `/api/places/search-along-route-detour` | Filter route stops by estimated extra travel time |
+| `POST` | `/api/places/halfway-search` | Search along the route, using its middle vertex as routing origin |
+| `POST` | `/api/places/halfway-nearby` | Search in a rectangular area around the middle route vertex |
+| `POST` | `/api/places/halfway-by-distance` | Locate a midpoint using the route's distance |
+| `POST` | `/api/road-trip/search` | Calculate a route and return ranked stop recommendations |
 
-Example Road Trip Copilot request:
+Start by calling `/api/routes` with `originLat`, `originLng`,
+`destinationLat`, and `destinationLng`. Its response contains the encoded
+route polyline (`route.polyline.encodedPolyline`), which can be passed to the
+route-search endpoints.
+
+| Endpoint | JSON request body |
+| --- | --- |
+| `/api/routes` | `originLat`, `originLng`, `destinationLat`, `destinationLng` |
+| `/api/places/search-along-route` | `query`, `encodedPolyline` |
+| `/api/places/search-along-route-detour` | `query`, `encodedPolyline`, `maxDetourMinutes` |
+| `/api/places/halfway-search` | `query`, `encodedPolyline` |
+| `/api/places/halfway-nearby` | `query`, `encodedPolyline` |
+| `/api/places/halfway-by-distance` | `query`, `encodedPolyline`, `distanceMeters` |
+| `/api/road-trip/search` | `originLat`, `originLng`, `destinationLat`, `destinationLng`, `query`, `maxDetourMinutes` |
+
+The main response fields are:
+
+| Endpoint | Response data |
+| --- | --- |
+| `/api/routes` | `route` with distance, duration, and encoded polyline |
+| `/api/places/search-along-route` | `places` and `routingSummaries` |
+| `/api/places/search-along-route-detour` | `places` with estimated detour minutes and journey percentage |
+| `/api/places/halfway-search` | `halfwayPoint`, `places`, and `routingSummaries` |
+| `/api/places/halfway-nearby` | `halfwayPoint` and `places` |
+| `/api/places/halfway-by-distance` | `halfwayPoint` and `places` |
+| `/api/road-trip/search` | `halfwayPoint`, route distance/duration, and scored `places` |
+
+`/api/places/search-along-route` returns matching places and Google's routing
+summaries. The halfway endpoints also return the calculated `halfwayPoint`.
+The regular halfway search changes the routing origin to that point; the
+nearby and distance-based versions restrict the search to a rectangle around
+their midpoint.
+
+The detour-search endpoint compares candidate travel times against fixed
+sample-route distance and duration values in the implementation. Its detour
+estimates therefore should not be treated as route-specific for arbitrary
+polylines.
+
+The Road Trip endpoint combines the route, midpoint, and place search in one
+request. It returns route distance and duration, the midpoint, and places
+filtered by `maxDetourMinutes`. Its ranking score combines Google ratings,
+review count, and detour time; places with the highest score appear first.
+The score is a simple application heuristic, not a Google rating.
+
+Example Road Trip request:
 
 ```bash
 curl -X POST http://localhost:3000/api/road-trip/search \
@@ -109,7 +169,10 @@ curl -X POST http://localhost:3000/api/road-trip/search \
   }'
 ```
 
-The response includes the route’s halfway point, distance and duration, plus recommendations ranked by a blend of rating, review count, and detour time.
+Successful responses generally include `"success": true`. Missing required
+fields on the text-search and nearby-search endpoints produce HTTP 400;
+Google API errors are returned with the upstream status, and unexpected
+server errors produce HTTP 500 with a `message`.
 
 ## 🗂️ Project structure
 
@@ -117,8 +180,8 @@ The response includes the route’s halfway point, distance and duration, plus r
 .
 ├── server.js        # Server entry point (port 3000)
 ├── src/
-│   ├── app.js       # Express configuration
-│   └── routes.js    # Maps, Places, Gemini, and trip-planning endpoints
+│   ├── app.js       # Express configuration and /api route mounting
+│   └── route.js     # Maps, Places, Gemini, and trip-planning endpoints
 ├── .env.example     # Required environment variable names
 └── package.json
 ```
